@@ -1,0 +1,66 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from pymongo import MongoClient
+from pymongo.collection import Collection
+from typing import List
+
+# FastAPI app
+app = FastAPI()
+
+# PostgreSQL database configuration
+POSTGRES_DATABASE_URL = "postgresql://username:password@localhost/dbname"
+engine = create_engine(POSTGRES_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password = Column(String)
+
+# MongoDB database configuration
+MONGODB_CONNECTION_STRING = "mongodb://localhost:27017/"
+MONGO_DB_NAME = "mongo_db"
+mongo_client = MongoClient(MONGODB_CONNECTION_STRING)
+mongo_db = mongo_client[MONGO_DB_NAME]
+mongo_collection: Collection = mongo_db["users"]
+
+# Pydantic model for user registration
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+
+# FastAPI endpoints
+@app.post("/register/", response_model=UserCreate)
+async def register_user(user: UserCreate):
+    # Insert user data into PostgreSQL
+    db_user = User(username=user.username, email=user.email, password=user.password)
+    db = SessionLocal()
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    db.close()
+
+    # Insert user data into MongoDB
+    mongo_collection.insert_one({"username": user.username, "email": user.email, "password": user.password})
+
+    return user
+
+@app.get("/users/", response_model=List[UserCreate])
+async def get_users():
+    # Retrieve user data from PostgreSQL
+    db = SessionLocal()
+    users = db.query(User).all()
+    db.close()
+
+    # Retrieve user data from MongoDB
+    mongo_users = list(mongo_collection.find({}, {"_id": 0}))
+    
+    return users + mongo_users
